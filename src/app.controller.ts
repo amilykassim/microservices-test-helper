@@ -2,6 +2,7 @@ import { Body, Controller, Post, Res } from '@nestjs/common';
 import { Client, MessagePattern, Payload } from '@nestjs/microservices/decorators';
 import { ClientKafka, Transport } from '@nestjs/microservices';
 import { KafkaHelper } from './utils/kafka-helper';
+import { GatewayModel } from './dto/gateway.dto';
 require('dotenv').config(); // setup the necessary kafka configs
 
 @Controller('/api/v1')
@@ -115,5 +116,18 @@ export class AppController {
 
     // const status = { merchantId: data.value.merchantId, message: '[wallet microservice] Deducted sms successfully...' };
     // this.kafkaHelper.send(status, 'requestStatusTracking', process.env.REQUEST_STATUS_TRACKING_TOPIC);
+  }
+
+  @MessagePattern('ussd-gateway-agent-request')
+  async vodacomAgent(@Payload() payload) {
+    const res = payload.value;
+
+    const response: GatewayModel = res;
+    response.action = 'fc';
+    response.response = Math.random().toString();
+
+    this.kafkaHelper.send(response, 'gw response', 'ussd-gateway-agent-response');
+
+    console.log('sent the response back to vodacom agent');
   }
 }

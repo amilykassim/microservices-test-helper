@@ -1,26 +1,29 @@
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
-require('dotenv').config()
+import { join } from 'path';
+require('dotenv').config();
 
 async function bootstrap() {
   const port = process.env.PORT || 4000;
 
-  const app = await NestFactory.createMicroservice<MicroserviceOptions>(
-    AppModule,
-    {
-      transport: Transport.KAFKA,
-      options: {
-        client: {
-          brokers: [process.env.KAFKA_BROKER_URL],
-        },
-        consumer: {
-          groupId: 'api-helper-tester-group',
-        },
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.useStaticAssets(join(__dirname, '..', 'static'));
+  // microservice #1
+  const microservice = app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.KAFKA,
+    options: {
+      client: {
+        brokers: [process.env.KAFKA_BROKER_URL],
+      },
+      consumer: {
+        groupId: process.env.SMS_API_GROUP_ID,
       },
     },
-  );
+  });
 
-  app.listen(() => console.log(`>>>> Starting the sms gateway on port ${port}`));
+  await app.startAllMicroservicesAsync();
+  await app.listen(port);
 }
 bootstrap();
