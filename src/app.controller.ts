@@ -45,7 +45,7 @@ export class AppController {
     console.log('>>> the object is : ', data.value);
     const response = {
       "id": "walletId",
-      "merchantId": data.value.merchantId,
+      "merchantId": data.value.ownerId,
       "ownerName": data.value.ownerName,
       "balance": 0,
     };
