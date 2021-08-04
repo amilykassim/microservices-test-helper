@@ -11,10 +11,17 @@ export class SendController {
 		private readonly kafkaHelper: KafkaHelper,
 	) { }
 
-	@Post('/send')
+	@Post('/sendRequest')
 	async setSubscriptionPayment(@Req() request: any, @Res() res) {
 		// Set the type and the merchantId to the wallet payload
-		this.kafkaHelper.send(request.body, 'subscription', process.env.PGW_PAYMENT_REQUEST_TOPIC);
+		const allocateSMSRequest = {
+			"merchantId": "7117b4f0-cc3b-4ee4-955c-bb436a1498de",
+			"amount": 12,
+			"description": "SMS Allocation",
+			"transactionId": "7af0ca42-ff83-4815-bec9-065e4f22840b"
+		};
+
+		this.kafkaHelper.send(request.body, 'sms allocation', process.env.WALLET_SMS_ALLOCATE_REQUEST_TOPIC);
 
 		return res.send('received')
 

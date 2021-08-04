@@ -23,7 +23,7 @@ export class KafkaHelper {
       // Send the event data to kafka
       await this.producer.send({
         topic: topic,
-        messages: [{ value: messageToBeSent }],
+        messages: [{ value: messageToBeSent, headers: { appName: 'SMS-API' } }],
       });
 
       return { isMessageSent: true };

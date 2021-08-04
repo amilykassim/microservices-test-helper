@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Post, Res } from '@nestjs/common';
 import { Client, MessagePattern, Payload } from '@nestjs/microservices/decorators';
 import { ClientKafka, Transport } from '@nestjs/microservices';
 import { KafkaHelper } from './utils/kafka-helper';
@@ -27,6 +27,21 @@ export class AppController {
   constructor(
     private readonly kafkaHelper: KafkaHelper,
   ) { }
+
+
+  @Get('')
+  async testKeycloakSMSAPI() {
+    console.log('\n\n\n\n send data to sms api to test keycloak...');
+
+    const request = {
+      clientId: "account",
+      eventType: "REGISTER",
+      userId: "description",
+      customerInfo: { attributes: { phoneNumber: ["250782228870"], email: ['test@gmail.com'], username: ['elonmusk'] } },
+    };
+
+    this.kafkaHelper.send(request, 'keycloak', process.env.KEYCLOAK_REGISTER_TOPIC);
+  }
 
   @MessagePattern(process.env.BILLING_SUBSCRIPTION_REQUEST_TOPIC)
   async setSubscriptionPayment(@Payload() data) {
@@ -68,7 +83,7 @@ export class AppController {
     };
 
     this.kafkaHelper.send(response, 'serviceCost', process.env.BILLING_SERVICE_COST_RESPONSE_TOPIC);
-    
+
     // const status = { merchantId: data.value.merchantId, message: '[billing microservice] Billed service cost successfully...' };
     // this.kafkaHelper.send(status, 'requestStatusTracking', process.env.REQUEST_STATUS_TRACKING_TOPIC);
   }
@@ -114,8 +129,8 @@ export class AppController {
 
     this.kafkaHelper.send(response, 'mtnAgentResponse', process.env.WALLET_SMS_DEDUCT_RESPONSE_TOPIC);
 
-    // const status = { merchantId: data.value.merchantId, message: '[wallet microservice] Deducted sms successfully...' };
-    // this.kafkaHelper.send(status, 'requestStatusTracking', process.env.REQUEST_STATUS_TRACKING_TOPIC);
+    const status = { merchantId: data.value.merchantId, message: '[wallet microservice] Deducted sms successfully...' };
+    this.kafkaHelper.send(status, 'requestStatusTracking', process.env.REQUEST_STATUS_TRACKING_TOPIC);
   }
 
   @MessagePattern('ussd-gateway-agent-request')
