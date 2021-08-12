@@ -22,11 +22,25 @@ export class AppController {
     },
   })
   private readonly client: ClientKafka;
-  //
+
+  // PURCHASE SMS STATISTICS VARIABLES
   private purchaseErrors = [];
   private purchaseSuccess = [];
   private paymentTransactionId = null;
   private readonly PURCHASE_PROCESS = 4;
+  private readonly PURCHASE_CATEGORY = 'purchaseInfo';
+  private readonly purchaseProcess = {
+    'BillServiceCost': false,
+    'PaymentRequest': false,
+    'SMSAllocation': false,
+    'SendEmailNotificationRequest': false,
+  };
+
+  // SEND SMS STATISTICS VARIABLES
+  private sendSMSErrors = [];
+  private sendSMSSuccess = [];
+  private readonly SEND_SMS_PROCESS = 3;
+  private readonly SEND_SMS_CATEGORY = 'sendSMSInfo';
 
 
   async onModuleInit() {
@@ -48,7 +62,7 @@ export class AppController {
    *? 2. (Send SMS) (3 process)
    *  i. Check balance request -> wallet ms
    *  ii. Send SMS request -> SMS GW ms
-   *  iii. Deduct SMS request -> wallet ms
+   *  iii. Receive a response from agent and Deduct SMS request -> wallet ms
   
    *? 3. (Create Wallet) (2 process)
    *  i. Billing subscription request -> billing ms
@@ -61,6 +75,10 @@ export class AppController {
   async testSMSAPI(@Req() request: any, @Res() res) {
     this.purchaseSuccess = [];
     this.purchaseErrors = [];
+    this.purchaseProcess['BillServiceCost'] = false;
+    this.purchaseProcess['PaymentRequest'] = false;
+    this.purchaseProcess['SMSAllocation'] = false;
+    this.purchaseProcess['SendEmailNotificationRequest'] = false;
 
     const purchaseRequestPayload = {
       "telephoneNumber": "250782228870",
@@ -76,7 +94,8 @@ export class AppController {
     // authenticate
     const token = await this.authenticate();
 
-    // const data = await this.sendRequest('http://localhost:3000/api/v1/sms/send', purchaseRequestPayload);
+    // send requests to tests
+    // await this.sendRequest('http://localhost:3000/api/v1/sms/send', sendSMSRequestPayload, token);
     await this.sendRequest('http://localhost:3000/api/v1/sms/buy', purchaseRequestPayload, token);
 
 
@@ -172,8 +191,7 @@ export class AppController {
   @MessagePattern(process.env.BILLING_SERVICE_COST_REQUEST_TOPIC)
   async billServiceCostResponse(@Payload() data) {
     console.log('\n (PURCHASE REQUEST)\n');
-    this.validateBillServiceCostRequest(data.value, 'purchaseInfo', 'BillServiceCost');
-
+    this.validateBillServiceCostRequest(data.value, this.PURCHASE_CATEGORY, 'BillServiceCost');
 
     const response = {
       "result": 1.25, // due sms number
@@ -186,7 +204,7 @@ export class AppController {
 
   @MessagePattern(process.env.WALLET_SMS_ALLOCATE_REQUEST_TOPIC)
   async smsAllocation(@Payload() data) {
-    this.validateSMSAllocationRequest(data.value, 'purchaseInfo', 'SMSAllocation');
+    this.validateSMSAllocationRequest(data.value, this.PURCHASE_CATEGORY, 'SMSAllocation');
 
     const response = {
       "transactionId": data.value.transactionId,
@@ -198,7 +216,7 @@ export class AppController {
 
   @Post('/opay')
   async opayPaymentRequest(@Body() request: any, @Res() res) {
-    this.validateOpayRequest(request, 'purchaseInfo', 'PaymentRequest');
+    this.validateOpayRequest(request, this.PURCHASE_CATEGORY, 'PaymentRequest');
 
     const response = {
       code: '200',
@@ -229,7 +247,7 @@ export class AppController {
 
   @Post('/notifications')
   async emailNotificationRequest(@Body() request: any, @Res() res) {
-    this.validateEmailNotificationRequest(request, 'purchaseInfo', 'SendEmailNotificationRequest');
+    this.validateEmailNotificationRequest(request, this.PURCHASE_CATEGORY, 'SendEmailNotificationRequest');
 
     const response = {
       statusCode: '200',
@@ -244,20 +262,32 @@ export class AppController {
   //** START OF SENDING SMS TEST RESPONSES */
   @MessagePattern(process.env.WALLET_SMS_BALANCE_REQUEST_TOPIC)
   async smsBalance(@Payload() data) {
+    this.validateCheckSMSBalanceRequest(data.value, this.SEND_SMS_CATEGORY, 'CheckSMSBalance')
     const response = {
       "transactionId": data.value.transactionId,
       "balance": "4",
     }
 
     this.kafkaHelper.send(response, 'serviceCost', process.env.WALLET_SMS_BALANCE_RESPONSE_TOPIC);
+  }
 
-    // const status = { merchantId: data.value.merchantId, message: '[wallet microservice] Returned SMS balance successfully' };
-    // this.kafkaHelper.send(status, 'requestStatusTracking', process.env.REQUEST_STATUS_TRACKING_TOPIC);
+  @MessagePattern(process.env.SMS_API_SEND_SMS_REQUEST)
+  async smsGw(@Payload() data) {
+    this.validateSendSMSToGWRequest(data.value, this.SEND_SMS_CATEGORY, 'SendSMSToGW');
+
+    const response = {
+      code: '200',
+      messageId: '5c44ba9a-9e2b-4c10-a66f-a21d0e615f79',
+      customerId: data.value.customerId,
+      metadata: { smsAgent: { deliveryStatus: { status: 'success' } } }
+    };
+
+    this.kafkaHelper.send(response, 'serviceCost', process.env.MTN_AGENT_RESPONSE_TOPIC);
   }
 
   @MessagePattern(process.env.WALLET_SMS_DEDUCT_REQUEST_TOPIC)
   async smsDeduction(@Payload() data) {
-    console.log('\n\n\n\n Returning a response sms deduction.....');
+    this.validateSMSDeductRequest(data.value, this.SEND_SMS_CATEGORY, 'DeductSMS');
 
     const response = {
       "status": 'SUCCESS',
@@ -265,9 +295,6 @@ export class AppController {
     };
 
     this.kafkaHelper.send(response, 'mtnAgentResponse', process.env.WALLET_SMS_DEDUCT_RESPONSE_TOPIC);
-
-    const status = { merchantId: data.value.merchantId, message: '[wallet microservice] Deducted sms successfully...' };
-    this.kafkaHelper.send(status, 'requestStatusTracking', process.env.REQUEST_STATUS_TRACKING_TOPIC);
   }
   //** END OF SENDING SMS TEST RESPONSES */
 
@@ -304,7 +331,6 @@ export class AppController {
 
 
 
-  //** START OF VALIDATION FOR PURCHASE FUNCTIONALITIES*/
   validate(schema, request, requestType, categoryName) {
     const { error } = schema.validate(request);
     if (error) {
@@ -315,8 +341,47 @@ export class AppController {
       return { error: error.message }
     };
 
-    console.log(`1. ${colors.green('SUCCESS')} (${requestType}) request is VALID ==> `, request);
-    this.aggregateResults({ category: { name: categoryName, success: request.transactionId } });
+    // console.log(`1. ${colors.green('SUCCESS')} (${requestType}) request is VALID ==> `, request);
+    
+    if (categoryName == this.PURCHASE_CATEGORY) this.purchaseProcess[requestType] = true;
+    // if (categoryName == this.SEND_SMS_CATEGORY) this.purchaseProcess[requestType] = true;
+
+    return this.aggregateResults({ category: { name: categoryName, success: request.transactionId } });
+  }
+
+  aggregateResults(result) {
+    const { category } = result;
+    if (category.name == this.PURCHASE_CATEGORY) {
+      this.addPurchaseResults(category);
+
+      return console.log(`Final results: 
+        ${(this.purchaseSuccess.length == this.PURCHASE_PROCESS) ? '✅ ' : '🔴'} Purchase:
+          1. Success -> (${(this.purchaseSuccess.length)}/${Object.keys(this.purchaseProcess).length})
+              ${this.displayProcess(this.purchaseProcess)}
+          2. Errors -> (${(this.purchaseErrors.length)} errors -> `, this.purchaseErrors);
+    }
+    if (category.name == this.SEND_SMS_CATEGORY) {
+      this.addSendSMSResults(category);
+
+      return console.log(`Final results: 
+        ${(this.sendSMSSuccess.length == this.SEND_SMS_PROCESS) ? '✅ ' : '🔴'} SendSMS:
+          1. Success -> (${(this.sendSMSSuccess.length)}/${this.SEND_SMS_PROCESS})
+          2. Errors -> (${(this.sendSMSErrors.length)} errors -> `, this.sendSMSErrors);
+    }
+  }
+
+  displayProcess(data) {
+    let result = '  ';
+    const keys = Object.keys(data);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const value = data[key];
+      result += `${i + 1}. ${key} ${(value) ? colors.green('✔') : colors.red('𐄂')}\n\t\t`
+    }
+
+    // console.log('\n\n\n\n>>>> THE DISPLAY PROCESS IS : ', data[keys[0]]);
+
+    return result;
   }
 
   //** START OF VALIDATION FOR PURCHASE FUNCTIONALITIES*/
@@ -347,7 +412,7 @@ export class AppController {
         .required()
     });
 
-    this.validate(schema, request, requestType, categoryName);
+    return this.validate(schema, request, requestType, categoryName);
   }
 
   validateSMSAllocationRequest(request: any, categoryName: string, requestType: string) {
@@ -369,20 +434,12 @@ export class AppController {
         .required()
     });
 
-    this.validate(schema, request, requestType, categoryName);
+    return this.validate(schema, request, requestType, categoryName);
   }
 
   validateEmailNotificationRequest(request: any, categoryName: string, requestType: string) {
-    // {
-    //   sender: { name: 'Oltranz ltd', email: 'accounts@oltranz.com' },
-    //   to: [{ email: 'amilykassim012@gmail.com' }],
-    //     subject: 'Purchased SMS successfully',
-    //       htmlContent: '<p><b>SMS purchase done successfully!</b></p>'
-    // }
-
     const receiverEmailSchema = Joi.object({ email: Joi.string().email().required() });
     const senderSchema = Joi.object().keys({ name: Joi.string().min(1).max(255).required(), email: Joi.string().email().required() });
-    // const sender = Joi.object({ email: Joi.string().email().required() });
 
     const schema = Joi.object({
       to: Joi.array()
@@ -399,7 +456,7 @@ export class AppController {
         .required()
     });
 
-    this.validate(schema, request, requestType, categoryName);
+    return this.validate(schema, request, requestType, categoryName);
   }
 
   validateBillServiceCostRequest(request: any, categoryName: string, requestType: string) {
@@ -420,25 +477,91 @@ export class AppController {
         .required()
     });
 
-    this.validate(schema, request, requestType, categoryName);
+    return this.validate(schema, request, requestType, categoryName);
+  }
+  //** END OF VALIDATION FOR PURCHASE FUNCTIONALITIES*/
+
+  //** START OF VALIDATION FOR SEND SMS FUNCTIONALITIES*/
+  validateCheckSMSBalanceRequest(request: any, categoryName: string, requestType: string) {
+    // check sms balance schema
+    const schema = Joi.object({
+      merchantId: Joi.string()
+        .min(10)
+        .max(255)
+        .required(),
+      transactionId: Joi.string()
+        .min(10)
+        .max(255)
+        .required(),
+      onlyCheckSMSWalletBalance: Joi.boolean()
+      .valid(true)
+    });
+
+    return this.validate(schema, request, requestType, categoryName);
   }
 
-  aggregateResults(result) {
-    const { category } = result;
-    if (category.name == 'purchaseInfo') this.addPurchaseResults(category);
+  validateSendSMSToGWRequest(request: any, categoryName: string, requestType: string) {
+    const metadataSchema = Joi.object().keys({
+      smsApi: Joi.object().keys(
+        {
+          campaignId: Joi.string().min(10).max(255).required(),
+          launcherPhoneNumber: Joi.string().min(6).max(30).required()
+        })
+        .required()
+    });
 
+    const schema = Joi.object({
+      receiver: Joi.array()
+        .items(Joi.string()
+          .min(6)
+          .max(30)
+          .required())
+        .required(),
+      customerId: Joi.string()
+        .min(10)
+        .max(255)
+        .required(),
+      message: Joi.string()
+        .min(1)
+        .max(255)
+        .required(),
+      header: Joi.string()
+        .min(1)
+        .max(11)
+        .required(),
+      metadata: metadataSchema
+    });
 
-    const purchaseErrorsResults = Array.from(new Set(this.purchaseErrors));
-    const purchaseSuccessResults = Array.from(new Set(this.purchaseSuccess));
-    console.log(`Final results: 
-    ${(purchaseSuccessResults.length == this.PURCHASE_PROCESS) ? '✅ ' : '🔴'} Purchase:
-          1. Success -> (${(purchaseSuccessResults.length)}/${this.PURCHASE_PROCESS})
-          2. Errors -> (${(purchaseErrorsResults.length)} errors -> `, purchaseErrorsResults);
+    return this.validate(schema, request, requestType, categoryName);
   }
 
-  addPurchaseResults(purchaseInfo) {
-    const { error, success } = purchaseInfo
-    if (error) this.purchaseErrors.push(error)
-    else this.purchaseSuccess.push(success)
+  validateSMSDeductRequest(request: any, categoryName: string, requestType: string) {
+    const schema = Joi.object({
+      merchantId: Joi.string()
+        .min(10)
+        .max(255)
+        .required(),
+      transactionId: Joi.string()
+        .min(10)
+        .max(255)
+        .required(),
+      amount: Joi.number()
+        .valid(1) // fixed amount
+        .required()
+    });
+
+    return this.validate(schema, request, requestType, categoryName);
+  }
+
+  addPurchaseResults(data) {
+    const { error, success } = data
+    if (error) return this.purchaseErrors.push(error)
+    else return this.purchaseSuccess.push(success)
+  }
+
+  addSendSMSResults(data) {
+    const { error, success } = data
+    if (error) return this.sendSMSErrors.push(error)
+    else return this.sendSMSSuccess.push(success)
   }
 }
