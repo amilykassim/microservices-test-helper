@@ -44,7 +44,6 @@ export class AppController {
 
 
   async onModuleInit() {
-    console.log('>>> initated the app')
     await this.client.connect();
   }
   constructor(
@@ -190,7 +189,6 @@ export class AppController {
   //** START OF PURCHASE TEST RESPONSES */
   @MessagePattern(process.env.BILLING_SERVICE_COST_REQUEST_TOPIC)
   async billServiceCostResponse(@Payload() data) {
-    console.log('\n (PURCHASE REQUEST)\n');
     this.validateBillServiceCostRequest(data.value, this.PURCHASE_CATEGORY, 'BillServiceCost');
 
     const response = {
@@ -207,8 +205,8 @@ export class AppController {
     this.validateSMSAllocationRequest(data.value, this.PURCHASE_CATEGORY, 'SMSAllocation');
 
     const response = {
-      "transactionId": data.value.transactionId,
-      "status": "SUCCESS",
+      sessionId: data.value.sessionId,
+      status: "SUCCESS",
     }
 
     this.kafkaHelper.send(response, 'serviceCost', process.env.WALLET_SMS_ALLOCATE_RESPONSE_TOPIC);
@@ -264,7 +262,7 @@ export class AppController {
   async smsBalance(@Payload() data) {
     this.validateCheckSMSBalanceRequest(data.value, this.SEND_SMS_CATEGORY, 'CheckSMSBalance')
     const response = {
-      "transactionId": data.value.transactionId,
+      "sessionId": data.value.sessionId,
       "balance": "4",
     }
 
@@ -290,8 +288,8 @@ export class AppController {
     this.validateSMSDeductRequest(data.value, this.SEND_SMS_CATEGORY, 'DeductSMS');
 
     const response = {
-      "status": 'SUCCESS',
-      "transactionId": data.value.transactionId,
+      status: 'SUCCESS',
+      sessionId: data.value.sessionId,
     };
 
     this.kafkaHelper.send(response, 'mtnAgentResponse', process.env.WALLET_SMS_DEDUCT_RESPONSE_TOPIC);
@@ -417,11 +415,11 @@ export class AppController {
 
   validateSMSAllocationRequest(request: any, categoryName: string, requestType: string) {
     const schema = Joi.object({
-      merchantId: Joi.string()
+      customerId: Joi.string()
         .min(10)
         .max(255)
         .required(),
-      transactionId: Joi.string()
+      sessionId: Joi.string()
         .min(10)
         .max(255)
         .required(),
@@ -485,11 +483,11 @@ export class AppController {
   validateCheckSMSBalanceRequest(request: any, categoryName: string, requestType: string) {
     // check sms balance schema
     const schema = Joi.object({
-      merchantId: Joi.string()
+      customerId: Joi.string()
         .min(10)
         .max(255)
         .required(),
-      transactionId: Joi.string()
+      sessionId: Joi.string()
         .min(10)
         .max(255)
         .required(),
@@ -537,11 +535,11 @@ export class AppController {
 
   validateSMSDeductRequest(request: any, categoryName: string, requestType: string) {
     const schema = Joi.object({
-      merchantId: Joi.string()
+      customerId: Joi.string()
         .min(10)
         .max(255)
         .required(),
-      transactionId: Joi.string()
+      sessionId: Joi.string()
         .min(10)
         .max(255)
         .required(),

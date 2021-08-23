@@ -30,19 +30,30 @@ export class SendController {
 
 	@Post('/vodacom/login')
 	async vodacomLogin(@Body() request: any, @Res() res) {
+		// console.log('\n\n>> called vodacom login');
 		return res.status(200).send(this.getLoginResponsePayload());
 	}
 
 	@Post('/vodacom/pay')
 	async vodacomPay(@Body() request: any, @Res() res) {
+		// console.log('\n\n>> called vodacom telco payment request');
 		return res.status(200).send(this.getInitiatePaymentPayload());
+	}
+
+	@Post('/vodacom/paymentRequest')
+	async vodacomSend(@Body() request: any, @Res() res) {
+		// console.log('\n\n>> called vodacom payment request');
+
+		this.kafkaHelper.send(request, 'vodacom payment request', process.env.PGW_VODACOM_PAYMENT_REQUEST_TOPIC);
+
+		return res.status(200).json(request)
 	}
 
 	@Post('/payments/callback')
 	async paymentCallback(@Body() request: any, @Res() res) {
 		const callbackRequest = this.getCallbackresponse();
-		console.log('>>> the call back request is : ', callbackRequest);
-		const data = await this.sendRequest(process.env.AGENT_CALLBACK_URL, this.getCallbackresponse());
+		// console.log('>>> the call back request is : ', callbackRequest);
+		const data = await this.sendRequest2(process.env.AGENT_CALLBACK_URL, this.getCallbackresponse());
 
 		return res.status(200).send(this.getInitiatePaymentPayload());
 	}
@@ -60,6 +71,29 @@ export class SendController {
     }
 	}
 
+	async sendRequest2(url: string, request: string) {
+		try {
+			console.log('>>>>> about to send the request...');
+	  
+			let { data } = await axios.post(url, request,
+			  { headers: { 'content-type': 'text/xml' } }
+			);
+	  
+			console.log('>>>>> sent the request..');
+	  
+			// parse xml string
+			// parseString(data, function (err, result) {
+			//   data = result;
+			// });
+	  
+			console.log('>>>> the vodacom backend response data is : ', data);
+	  
+			return data;
+		  } catch (error) {
+			console.log('>>>>error while calling backend is : ', error);
+			return null;
+		  }
+	}
 
 	getLoginResponsePayload() {
 		return `<?xml version='1.0' encoding='UTF-8'?>
