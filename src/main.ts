@@ -18,7 +18,7 @@ async function bootstrap() {
         brokers: [process.env.KAFKA_BROKER_URL],
       },
       consumer: {
-        groupId: process.env.SMS_API_GROUP_ID,
+        groupId: process.env.API_HELPER_GROUP_ID,
       },
     },
   });

@@ -4,6 +4,7 @@ import { ClientKafka, Transport } from '@nestjs/microservices';
 import { KafkaHelper } from './utils/kafka-helper';
 import { GatewayModel } from './dto/gateway.dto';
 import axios from 'axios';
+import { RedisHelper } from './utils/redis-helper';
 require('dotenv').config();
 const Joi = require('joi');
 const colors = require('colors/safe');
@@ -42,12 +43,16 @@ export class AppController {
   private readonly SEND_SMS_PROCESS = 3;
   private readonly SEND_SMS_CATEGORY = 'sendSMSInfo';
 
+  // DELETER LATER
+  private amountToDeduct = 0;
+
 
   async onModuleInit() {
     await this.client.connect();
   }
   constructor(
     private readonly kafkaHelper: KafkaHelper,
+    private readonly redisHelper: RedisHelper,
   ) { }
 
   /**
@@ -70,6 +75,32 @@ export class AppController {
    * The test to be a success, you should see the aggregate results as Purchase(- Success (2/2) ))
    */
 
+
+  @Get('/deleteRedis')
+  async deleteDataFromRedis(@Req() request: any, @Res() res) {
+
+    const smstodelete = await this.getSMSFromRedis('retriable-mtn-campaign');
+    for (let sms of smstodelete) {
+      await this.deleteSMSFromRedis(sms);
+    }
+
+    return res.send('Delete successfully');
+  }
+
+  async deleteSMSFromRedis(sms) {
+    return this.redisHelper.unlink(`retriable-mtn-campaign-${sms.metadata['smsGw']['campaignId']}-${sms.receiver}`);
+  }
+
+  async getSMSFromRedis(key: string) {
+    const data = [];
+    const keys = await this.redisHelper.getKeys(key);
+    for (let i = 0; i < keys.length; i++) {
+      const sms = await this.redisHelper.get(keys[i]);
+      data.push(sms);
+    }
+    return data;
+  }
+
   @Post('/testSMSAPI')
   async testSMSAPI(@Req() request: any, @Res() res) {
     this.purchaseSuccess = [];
@@ -87,16 +118,16 @@ export class AppController {
     const sendSMSRequestPayload = {
       "title": "Oltranz",
       "message": "Test message",
-      "receivers": ["250782228870"]
+      "receivers": ["250782228870"],
+      "contactListName": "VIP customers"
     };
 
     // authenticate
     const token = await this.authenticate();
 
     // send requests to tests
-    // await this.sendRequest('http://localhost:3000/api/v1/sms/send', sendSMSRequestPayload, token);
-    await this.sendRequest('http://localhost:3000/api/v1/sms/buy', purchaseRequestPayload, token);
-
+    await this.sendRequest('http://localhost:3000/api/v1/sms/send', sendSMSRequestPayload, token);
+    // await this.sendRequest('http://localhost:3000/api/v1/sms/buy', purchaseRequestPayload, token);
 
     return res.send('Started tests successfully, please checkout the console for aggregated results');
   }
@@ -116,14 +147,14 @@ export class AppController {
     let config = { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } };
 
     const payload = {
-      client_secret: 'b07f33a3-ce6f-493f-8e35-f80904390661',
+      client_secret: '2b445b2d-de10-442d-85ae-960f6267881a',
       client_id: 'amily-inc',
       grant_type: 'client_credentials'
     }
 
     try {
       const res = await axios.post(
-        'https://auth.oltranz.com/auth/realms/api/protocol/openid-connect/token',
+        'https://auth.oltranz.com/auth/realms/api-dev/protocol/openid-connect/token',
         qs.stringify(payload),
         config);
 
@@ -168,7 +199,7 @@ export class AppController {
 
   @MessagePattern(process.env.WALLET_CREATE_REQUEST_TOPIC)
   async createWallet(@Payload() data) {
-    console.log('>>> the object is : ', data.value);
+    console.log('>>> the wallet object is : ', data.value);
     const response = {
       "id": "walletId",
       "merchantId": data.value.ownerId,
@@ -205,9 +236,25 @@ export class AppController {
     this.validateSMSAllocationRequest(data.value, this.PURCHASE_CATEGORY, 'SMSAllocation');
 
     const response = {
-      sessionId: data.value.sessionId,
+      transactionId: data.value.transactionId,
       status: "SUCCESS",
-    }
+      description: "Done successfully",
+      trackId: data.value.trackId,
+      smsBalance: 10,
+      metadata: {
+        request: {
+          merchantId: "03ed9d0e-7c8e-4880-b9f0-004a071fa10f",
+          amount: 10,
+          description: "SMS Allocation",
+          transactionId: data.value.transactionId,
+          trackId: data.value.trackId,
+          metadata: {
+            email: 'amily@gmail.com'
+          }
+        }
+      },
+      smsAllocated: 10
+    };
 
     this.kafkaHelper.send(response, 'serviceCost', process.env.WALLET_SMS_ALLOCATE_RESPONSE_TOPIC);
   }
@@ -262,21 +309,54 @@ export class AppController {
   async smsBalance(@Payload() data) {
     this.validateCheckSMSBalanceRequest(data.value, this.SEND_SMS_CATEGORY, 'CheckSMSBalance')
     const response = {
-      "sessionId": data.value.sessionId,
-      "balance": "4",
-    }
+      transactionId: data.value.transactionId,
+      balance: "10",
+      trackId: data.value.trackId,
+      status: 'SUCCESS',
+      metadata: {
+        "request": {
+           "merchantId": data.value.merchantId,
+           "transactionId": data.value.transactionId,
+           "trackId": data.value.trackId,
+           "onlyCheckSMSWalletBalance": false,
+           "metadata": {
+              "request": {
+                 "title": "Test",
+                 "message": data.value.metadata.request.message,
+                 "receivers": data.value.metadata.request.receivers,
+                 "callbackUrl": data.value.metadata.request.callbackUrl,
+                 "customerId": data.value.merchantId,
+                 "trackId": data.value.trackId,
+                 "metadata": {
+                    "smsApi": {
+                       "campaignId": "d190b660-c14d-4b45-9af3-068ff3bf5aa6",
+                       "launcherPhoneNumber": "250782228870"
+                    }
+                 }
+              },
+              "userInfo": {
+                 "name": "service-account-amily-inc",
+                 "email": "amilykassim012@gmail.com"
+              }
+           }
+        }
+     }
+   }
 
     this.kafkaHelper.send(response, 'serviceCost', process.env.WALLET_SMS_BALANCE_RESPONSE_TOPIC);
   }
 
-  @MessagePattern(process.env.SMS_API_SEND_SMS_REQUEST)
+  // @MessagePattern(process.env.SMS_API_SEND_SMS_REQUEST)
   async smsGw(@Payload() data) {
-    this.validateSendSMSToGWRequest(data.value, this.SEND_SMS_CATEGORY, 'SendSMSToGW');
+    // this.validateSendSMSToGWRequest(data.value, this.SEND_SMS_CATEGORY, 'SendSMSToGW');
+
+    console.log('\n\n>>> respond to sms api', data.value);
 
     const response = {
       code: '200',
       messageId: '5c44ba9a-9e2b-4c10-a66f-a21d0e615f79',
       customerId: data.value.customerId,
+      trackId: data.value.trackId,
       metadata: { smsAgent: { deliveryStatus: { status: 'success' } } }
     };
 
@@ -285,12 +365,28 @@ export class AppController {
 
   @MessagePattern(process.env.WALLET_SMS_DEDUCT_REQUEST_TOPIC)
   async smsDeduction(@Payload() data) {
-    this.validateSMSDeductRequest(data.value, this.SEND_SMS_CATEGORY, 'DeductSMS');
+    // this.validateSMSDeductRequest(data.value, this.SEND_SMS_CATEGORY, 'DeductSMS');
+    console.log(data.value);
+    this.amountToDeduct += data.value.amount;
+
+    console.log('\n\n The total: ', this.amountToDeduct);
 
     const response = {
-      status: 'SUCCESS',
-      sessionId: data.value.sessionId,
-    };
+      transactionId: data.value.transactionId,
+      status: "SUCCESS",
+      description: "Done successfully",
+      trackId: "f054d708-2ad9-4798-8c96-9ba6927c14b1",
+      smsBalance: 429468,
+      metadata: {
+        request: {
+          merchantId: "db8aae67-8353-45dd-91f7-7c85d3900646",
+          amount: 1,
+          transactionId: data.value.transactionId,
+          trackId: "f054d708-2ad9-4798-8c96-9ba6927c14b1",
+        }
+      },
+      smsDeducted: 1
+    }
 
     this.kafkaHelper.send(response, 'mtnAgentResponse', process.env.WALLET_SMS_DEDUCT_RESPONSE_TOPIC);
   }
@@ -340,7 +436,7 @@ export class AppController {
     };
 
     // console.log(`1. ${colors.green('SUCCESS')} (${requestType}) request is VALID ==> `, request);
-    
+
     if (categoryName == this.PURCHASE_CATEGORY) this.purchaseProcess[requestType] = true;
     // if (categoryName == this.SEND_SMS_CATEGORY) this.purchaseProcess[requestType] = true;
 
@@ -415,11 +511,11 @@ export class AppController {
 
   validateSMSAllocationRequest(request: any, categoryName: string, requestType: string) {
     const schema = Joi.object({
-      customerId: Joi.string()
+      merchantId: Joi.string()
         .min(10)
         .max(255)
         .required(),
-      sessionId: Joi.string()
+      transactionId: Joi.string()
         .min(10)
         .max(255)
         .required(),
@@ -429,7 +525,8 @@ export class AppController {
         .required(),
       amount: Joi.number()
         .valid(1) // fixed amount
-        .required()
+        .required(),
+      trackId: Joi.string()
     });
 
     return this.validate(schema, request, requestType, categoryName);
@@ -472,7 +569,8 @@ export class AppController {
         .required(),
       amount: Joi.number()
         .valid(8) // fixed amount
-        .required()
+        .required(),
+      trackId: Joi.string()
     });
 
     return this.validate(schema, request, requestType, categoryName);
@@ -483,16 +581,16 @@ export class AppController {
   validateCheckSMSBalanceRequest(request: any, categoryName: string, requestType: string) {
     // check sms balance schema
     const schema = Joi.object({
-      customerId: Joi.string()
+      merchantId: Joi.string()
         .min(10)
         .max(255)
         .required(),
-      sessionId: Joi.string()
+      transactionId: Joi.string()
         .min(10)
         .max(255)
         .required(),
       onlyCheckSMSWalletBalance: Joi.boolean()
-      .valid(true)
+        .valid(true)
     });
 
     return this.validate(schema, request, requestType, categoryName);
@@ -535,11 +633,11 @@ export class AppController {
 
   validateSMSDeductRequest(request: any, categoryName: string, requestType: string) {
     const schema = Joi.object({
-      customerId: Joi.string()
+      merchantId: Joi.string()
         .min(10)
         .max(255)
         .required(),
-      sessionId: Joi.string()
+      transactionId: Joi.string()
         .min(10)
         .max(255)
         .required(),
